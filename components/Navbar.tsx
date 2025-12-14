@@ -5,58 +5,68 @@ interface NavbarProps {
   walletAddress: string | null;
   onConnect: () => void;
   onCreateDrop: () => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ walletAddress, onConnect, onCreateDrop }) => {
+export const Navbar: React.FC<NavbarProps> = ({ walletAddress, onConnect, onCreateDrop, searchQuery, onSearchChange }) => {
   return (
-    <nav className="sticky top-0 z-40 h-20 px-6 md:px-12 flex items-center justify-between bg-[#080808]/80 backdrop-blur-xl border-b border-white/5">
+    <nav className="sticky top-0 z-40 h-[72px] px-6 md:px-8 flex items-center justify-between bg-[#080808]/90 backdrop-blur-xl border-b border-white/5">
       {/* Brand */}
-      <div className="flex items-center gap-4 group cursor-pointer">
-        <div className="relative w-10 h-10 flex items-center justify-center bg-white text-black rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.2)] group-hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] transition-all duration-500">
-           <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2.5">
+      <div className="flex items-center gap-3 group cursor-pointer mr-8">
+        <div className="relative w-8 h-8 flex items-center justify-center bg-indigo-600 rounded-lg shadow-lg group-hover:scale-105 transition-all">
+           <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-white" stroke="currentColor" strokeWidth="2.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         </div>
-        <span className="text-xl font-display font-bold tracking-tight text-white group-hover:text-indigo-300 transition-colors">NovaForge</span>
+        <span className="text-xl font-display font-bold tracking-tight text-white">NovaForge</span>
       </div>
 
-      {/* Center Nav */}
-      <div className="hidden lg:flex items-center gap-8 absolute left-1/2 transform -translate-x-1/2">
-         {['Governance', 'Bounties', 'Documentation', 'Analytics'].map((item) => (
-           <a key={item} href="#" className="text-sm font-medium text-neutral-400 hover:text-white transition-colors relative group">
-             {item}
-             <span className="absolute -bottom-1 left-0 w-0 h-[1px] bg-indigo-500 transition-all group-hover:w-full"></span>
-           </a>
-         ))}
+      {/* Global Search Bar */}
+      <div className="flex-1 max-w-2xl hidden md:block mx-4">
+        <div className="relative group">
+           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+             <svg className="h-5 w-5 text-neutral-500 group-focus-within:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+             </svg>
+           </div>
+           <input 
+             type="text"
+             value={searchQuery}
+             onChange={(e) => onSearchChange(e.target.value)}
+             className="block w-full pl-10 pr-3 py-2.5 border border-white/10 rounded-xl leading-5 bg-white/5 text-neutral-300 placeholder-neutral-500 focus:outline-none focus:bg-black focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-all shadow-inner"
+             placeholder="Search items..."
+           />
+        </div>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         {walletAddress && (
           <button 
             onClick={onCreateDrop}
-            className="hidden sm:flex items-center gap-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/5"
+            className="flex items-center gap-2 px-4 h-10 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+            title="Deploy Contract"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            <span>Deploy</span>
+            <span className="text-sm font-bold text-white hidden lg:block">Create Collection</span>
           </button>
         )}
 
         {walletAddress ? (
-          <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-full pl-2 pr-4 py-1.5 hover:border-white/20 transition-all">
-             <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center border border-indigo-500/30">
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></div>
+          <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-full pl-2 pr-4 py-1.5 hover:bg-white/10 transition-all cursor-pointer">
+             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center border border-white/20 shadow-inner">
              </div>
              <div className="flex flex-col">
-               <span className="text-xs font-bold text-white leading-none font-mono">{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
+               <span className="text-sm font-bold text-white leading-none font-mono">{walletAddress.slice(0, 4)}...{walletAddress.slice(-4)}</span>
              </div>
           </div>
         ) : (
           <Button 
             variant="primary" 
-            className="h-10 px-6 text-sm font-bold tracking-wide rounded-full"
+            className="h-10 px-6 text-sm font-bold tracking-wide rounded-xl"
             onClick={onConnect}
           >
             Connect Wallet

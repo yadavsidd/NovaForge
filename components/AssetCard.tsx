@@ -13,7 +13,9 @@ interface AssetCardProps {
 export const AssetCard: React.FC<AssetCardProps> = ({ asset, currentUser, onBuy, onList }) => {
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const isOwner = currentUser && asset.owner === currentUser;
+  // You are the owner if you hold it in wallet OR you are the seller listed on marketplace
+  const isOwner = currentUser && (asset.owner?.toLowerCase() === currentUser.toLowerCase() || asset.seller?.toLowerCase() === currentUser.toLowerCase());
+  
   const isForSale = asset.isListed;
   const displayImage = resolveIPFS(asset.image);
 
@@ -23,6 +25,9 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, currentUser, onBuy,
     try {
       if (isOwner) {
         if (!isForSale) await onList(asset);
+        // If it is for sale and I am the owner (seller), I cannot "Cancel Listing" easily with current contract logic 
+        // without buying it back or having a specific cancel function. 
+        // For now, we disable the button if listed by owner.
       } else {
         if (isForSale) await onBuy(asset);
       }
@@ -32,21 +37,16 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, currentUser, onBuy,
   };
 
   return (
-    <div className="group relative flex flex-col bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-white/20 hover:shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all duration-300">
+    <div className="group relative flex flex-col bg-[#111] rounded-2xl overflow-hidden border border-white/5 shadow-sm hover:shadow-[0_4px_20px_rgba(0,0,0,0.5)] hover:-translate-y-1 transition-all duration-300 cursor-pointer">
       
-      {/* Top Overlay */}
-      <div className="absolute top-3 left-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-         <RarityBadge rarity={asset.metadata.rarity} />
+      {/* Top Overlay Badges */}
+      <div className="absolute top-3 left-3 z-10 flex gap-2">
+         {asset.metadata.rarity !== 'Common' && (
+             <div className="backdrop-blur-md shadow-lg">
+                <RarityBadge rarity={asset.metadata.rarity} />
+             </div>
+         )}
       </div>
-
-      {isOwner && (
-        <div className="absolute top-3 right-3 z-10">
-          <span className="bg-black/60 backdrop-blur-md border border-white/10 text-white text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
-            OWNED
-          </span>
-        </div>
-      )}
 
       {/* Image Container */}
       <div className="relative aspect-square overflow-hidden bg-neutral-900">
@@ -54,7 +54,7 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, currentUser, onBuy,
           <img 
             src={displayImage} 
             alt={asset.metadata.name} 
-            className="w-full h-full object-cover grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500 ease-out"
+            className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -62,42 +62,60 @@ export const AssetCard: React.FC<AssetCardProps> = ({ asset, currentUser, onBuy,
           </div>
         )}
         
-        {/* Action Button - Slide Up on Hover */}
-        <div className="absolute inset-x-0 bottom-0 p-4 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out bg-gradient-to-t from-black/90 to-transparent pt-12">
+        {/* Buy/List Button - Appears on Hover */}
+        <div className="absolute inset-x-0 bottom-0 p-3 translate-y-full group-hover:translate-y-0 transition-transform duration-300 bg-gradient-to-t from-black/80 to-transparent pt-12 flex justify-center">
            <button 
              onClick={handleAction}
-             disabled={isProcessing || (!isOwner && !isForSale)}
-             className={`w-full py-3 rounded-lg text-xs font-bold uppercase tracking-wider backdrop-blur-md border transition-all ${
+             disabled={isProcessing || (isOwner && isForSale) || (!isOwner && !isForSale)}
+             className={`w-full py-3 rounded-xl text-sm font-bold shadow-lg backdrop-blur-md transition-all ${
                isOwner 
-                 ? 'bg-white text-black border-white hover:bg-neutral-200'
+                 ? isForSale 
+                    ? 'bg-neutral-800 text-neutral-400 cursor-default'
+                    : 'bg-white text-black hover:bg-neutral-200'
                  : isForSale 
-                   ? 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-500'
-                   : 'bg-neutral-800/50 text-neutral-500 border-neutral-700 cursor-not-allowed'
+                   ? 'bg-indigo-600 text-white hover:bg-indigo-500'
+                   : 'hidden'
              }`}
            >
-             {isProcessing ? "Processing..." : isOwner ? (isForSale ? "Cancel Listing" : "List Item") : (isForSale ? `Buy for ${asset.price} ETH` : "Not Listed")}
+             {isProcessing 
+                ? "Processing..." 
+                : isOwner 
+                    ? (isForSale ? "Listed on Market" : "List Item") 
+                    : "Buy Now"}
            </button>
         </div>
       </div>
 
-      {/* Details */}
-      <div className="p-4 bg-[#111] flex flex-col gap-1 relative z-20">
-        <div className="flex items-center justify-between">
-           <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{asset.org}</span>
-           <span className={`text-[10px] font-mono ${isForSale ? 'text-green-400' : 'text-neutral-600'}`}>
-              {isForSale ? '● LIVE' : '● HELD'}
-           </span>
+      {/* Card Details Footer */}
+      <div className="p-4 flex flex-col gap-3">
+        <div>
+           <div className="flex items-center justify-between mb-1">
+             <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide truncate pr-2">{asset.org}</span>
+             {isOwner && <span className="text-[10px] bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded">YOU</span>}
+           </div>
+           <h3 className="text-white font-display font-semibold text-sm truncate leading-tight">{asset.metadata.name}</h3>
         </div>
-        <h3 className="text-white font-display font-medium text-lg leading-tight truncate">{asset.metadata.name}</h3>
-        <div className="flex items-baseline gap-1 mt-1">
-           {isForSale ? (
-             <>
-                <span className="text-sm font-bold text-white">{asset.price}</span>
-                <span className="text-xs text-neutral-500">ETH</span>
-             </>
-           ) : (
-             <span className="text-xs text-neutral-600 italic">Unlisted</span>
-           )}
+
+        {/* Price Section */}
+        <div className="bg-white/5 rounded-lg p-3 flex justify-between items-end">
+            <div className="flex flex-col">
+                <span className="text-[10px] text-neutral-500 font-medium mb-0.5">Price</span>
+                <div className="flex items-baseline gap-1">
+                    {isForSale ? (
+                        <>
+                            <span className="text-sm font-bold text-white">{asset.price}</span>
+                            <span className="text-xs text-neutral-400">ETH</span>
+                        </>
+                    ) : (
+                        <span className="text-xs text-neutral-500 italic">Unlisted</span>
+                    )}
+                </div>
+            </div>
+            {/* Last Sale Mock Data */}
+            <div className="flex flex-col items-end text-right">
+                <span className="text-[10px] text-neutral-500 font-medium mb-0.5">Last Sale</span>
+                <span className="text-xs text-neutral-400 font-mono">{(parseFloat(asset.price) * 0.8).toFixed(2)} ETH</span>
+            </div>
         </div>
       </div>
     </div>

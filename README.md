@@ -32,7 +32,7 @@ npm run dev
 
 ## 🔗 Connect to Blockchain (Deploy Contracts)
 
-To enable real on-chain functionality (Minting, Buying, Listing), you must deploy your own smart contracts and connect them to the frontend.
+To enable real on-chain functionality (Minting, Buying, Listing, Auctions), you must deploy your own smart contracts and connect them to the frontend.
 
 ### Step 1: Create Smart Contracts
 
@@ -64,7 +64,7 @@ contract NovaNFT is ERC721URIStorage, Ownable {
 ```
 
 **B. NovaMarketplace.sol**
-*Secure Implementation: Checks-Effects-Interactions pattern to prevent reentrancy.*
+*Secure Implementation: Supports Fixed Price Listings AND Auctions.*
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -73,7 +73,8 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract NovaMarketplace is ReentrancyGuard {
-    struct Item {
+    // --- STATE ---
+    struct Listing {
         uint256 itemId;
         address nftContract;
         uint256 tokenId;
@@ -83,59 +84,113 @@ contract NovaMarketplace is ReentrancyGuard {
         bool sold;
     }
 
-    mapping(uint256 => Item) public items;
-    uint256 public itemCount;
+    struct Auction {
+        uint256 auctionId;
+        address nftContract;
+        uint256 tokenId;
+        address payable seller;
+        uint256 highestBid;
+        address payable highestBidder;
+        uint256 endTime;
+        bool active;
+        bool ended;
+    }
 
-    event ItemListed(uint256 indexed itemId, address indexed nftContract, uint256 tokenId, uint256 price, address indexed seller);
+    mapping(uint256 => Listing) public listings;
+    mapping(uint256 => Auction) public auctions;
+    
+    uint256 public listingCount;
+    uint256 public auctionCount;
+
+    // --- EVENTS ---
+    event ItemListed(uint256 indexed itemId, address indexed nftContract, uint256 tokenId, uint256 price, address seller);
     event ItemSold(uint256 indexed itemId, address indexed nftContract, uint256 tokenId, uint256 price, address indexed buyer);
+    
+    event AuctionCreated(uint256 indexed auctionId, address indexed nftContract, uint256 tokenId, uint256 minPrice, uint256 endTime, address seller);
+    event NewBid(uint256 indexed auctionId, address indexed bidder, uint256 amount);
+    event AuctionEnded(uint256 indexed auctionId, address winner, uint256 amount);
 
+    // --- FIXED PRICE LOGIC ---
     function listNFT(address _nftContract, uint256 _tokenId, uint256 _price) external nonReentrant {
-        require(_price > 0, "Price must be at least 1 wei");
-        require(_nftContract != address(0), "Invalid contract address");
-        
-        IERC721 nft = IERC721(_nftContract);
-        require(nft.ownerOf(_tokenId) == msg.sender, "Not the owner");
-        require(nft.isApprovedForAll(msg.sender, address(this)) || nft.getApproved(_tokenId) == address(this), "Marketplace not approved");
+        require(_price > 0, "Price must be > 0");
+        IERC721(_nftContract).transferFrom(msg.sender, address(this), _tokenId);
 
-        itemCount++;
-        
-        // Transfer NFT to marketplace
-        nft.transferFrom(msg.sender, address(this), _tokenId);
-        
-        items[itemCount] = Item(
-            itemCount,
-            _nftContract,
-            _tokenId,
-            payable(msg.sender),
-            address(0),
-            _price,
-            false
-        );
-
-        emit ItemListed(itemCount, _nftContract, _tokenId, _price, msg.sender);
+        listingCount++;
+        listings[listingCount] = Listing(listingCount, _nftContract, _tokenId, payable(msg.sender), address(0), _price, false);
+        emit ItemListed(listingCount, _nftContract, _tokenId, _price, msg.sender);
     }
 
     function buyNFT(uint256 _itemId) external payable nonReentrant {
-        uint256 price = items[_itemId].price;
-        uint256 tokenId = items[_itemId].tokenId;
-        address nftContract = items[_itemId].nftContract;
+        Listing storage item = listings[_itemId];
+        require(msg.value == item.price, "Incorrect price");
+        require(!item.sold, "Already sold");
 
-        require(msg.value == price, "Please submit the asking price");
-        require(!items[_itemId].sold, "Item already sold");
+        item.sold = true;
+        item.owner = msg.sender;
         
-        // EFFECTS (Update state BEFORE external calls)
-        items[_itemId].owner = msg.sender;
-        items[_itemId].sold = true;
-        
-        // INTERACTIONS
-        // 1. Pay the seller
-        (bool success, ) = items[_itemId].seller.call{value: msg.value}("");
-        require(success, "Transfer to seller failed");
+        item.seller.transfer(msg.value);
+        IERC721(item.nftContract).transferFrom(address(this), msg.sender, item.tokenId);
 
-        // 2. Transfer NFT to buyer
-        IERC721(nftContract).transferFrom(address(this), msg.sender, tokenId);
+        emit ItemSold(_itemId, item.nftContract, item.tokenId, item.price, msg.sender);
+    }
 
-        emit ItemSold(_itemId, nftContract, tokenId, price, msg.sender);
+    // --- AUCTION LOGIC ---
+    function createAuction(address _nftContract, uint256 _tokenId, uint256 _minPrice, uint256 _durationSeconds) external nonReentrant {
+        require(_durationSeconds >= 60, "Duration too short");
+        IERC721(_nftContract).transferFrom(msg.sender, address(this), _tokenId);
+
+        auctionCount++;
+        auctions[auctionCount] = Auction({
+            auctionId: auctionCount,
+            nftContract: _nftContract,
+            tokenId: _tokenId,
+            seller: payable(msg.sender),
+            highestBid: _minPrice,
+            highestBidder: payable(address(0)),
+            endTime: block.timestamp + _durationSeconds,
+            active: true,
+            ended: false
+        });
+
+        emit AuctionCreated(auctionCount, _nftContract, _tokenId, _minPrice, block.timestamp + _durationSeconds, msg.sender);
+    }
+
+    function placeBid(uint256 _auctionId) external payable nonReentrant {
+        Auction storage auction = auctions[_auctionId];
+        require(auction.active, "Auction not active");
+        require(block.timestamp < auction.endTime, "Auction ended");
+        require(msg.value > auction.highestBid, "Bid too low");
+
+        // Refund previous highest bidder
+        if (auction.highestBidder != address(0)) {
+            auction.highestBidder.transfer(auction.highestBid);
+        }
+
+        auction.highestBid = msg.value;
+        auction.highestBidder = payable(msg.sender);
+
+        emit NewBid(_auctionId, msg.sender, msg.value);
+    }
+
+    function endAuction(uint256 _auctionId) external nonReentrant {
+        Auction storage auction = auctions[_auctionId];
+        require(auction.active, "Not active");
+        require(block.timestamp >= auction.endTime, "Not ended yet");
+        require(!auction.ended, "Already ended");
+
+        auction.ended = true;
+        auction.active = false;
+
+        if (auction.highestBidder != address(0)) {
+            // Transfer NFT to winner, funds to seller
+            IERC721(auction.nftContract).transferFrom(address(this), auction.highestBidder, auction.tokenId);
+            auction.seller.transfer(auction.highestBid);
+        } else {
+            // No bids, return item to seller
+            IERC721(auction.nftContract).transferFrom(address(this), auction.seller, auction.tokenId);
+        }
+
+        emit AuctionEnded(_auctionId, auction.highestBidder, auction.highestBid);
     }
 }
 ```
@@ -145,11 +200,8 @@ contract NovaMarketplace is ReentrancyGuard {
 1. Go to [Remix Ethereum IDE](https://remix.ethereum.org/).
 2. Create the two files above in the `contracts` folder.
 3. Compile both files.
-4. **Deploy `NovaNFT`** first.
+4. **Deploy `NovaMarketplace`**.
    - Environment: `Injected Provider - MetaMask` (Ensure you are on Sepolia).
-   - Click Deploy.
-   - **Copy the Contract Address**.
-5. **Deploy `NovaMarketplace`**.
    - Click Deploy.
    - **Copy the Contract Address**.
 
@@ -164,6 +216,10 @@ export const CONTRACT_ADDRESSES = {
 };
 ```
 
+### Step 4: Enable UI Deployment (Optional)
+
+Paste the bytecode of `NovaNFT.sol` into `services/web3-config.ts` to allow creating collections from the UI.
+
 ---
 
 ## 📡 IPFS Storage Configuration
@@ -173,5 +229,3 @@ This project requires an IPFS gateway to store images and metadata without a bac
 1. **Sign up** for [Pinata](https://www.pinata.cloud/) (Free tier).
 2. **Get API Keys** (JWT).
 3. Update `services/storage.ts` to use the real Pinata API instead of the simulation code provided in the starter template.
-
-*Note: The default code runs in simulation mode so the UI works immediately, but files are not actually persisted to IPFS until you uncomment the Pinata integration code.*
